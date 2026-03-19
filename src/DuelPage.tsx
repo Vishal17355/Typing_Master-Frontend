@@ -21,7 +21,7 @@ const DUEL_TEXT =
   "The quick brown fox jumps over the lazy dog. Type this text as fast and as accurately as you can to beat your opponent.";
 
 const BACKEND_HTTP_URL =
-  import.meta.env.VITE_BACKEND_URL ?? "http://localhost:8080";
+  import.meta.env.VITE_BACKEND_URL ?? "https://typing-master-backend-production.up.railway.app";
 
 const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => {
   const pct = Math.max(0, Math.min(1, progress)) * 100;

@@ -7,8 +7,8 @@ export const HomePage: React.FC = () => {
       <header className="app-header">
         <div className="app-header-top">
           <div>
-            <h1>Typing Master</h1>
-            <p>Choose a mode to start.</p>
+            <h1>All modes</h1>
+            <p>Pick a way to practice or play.</p>
           </div>
           <nav className="app-nav">
             <Link to="/dashboard" className="nav-link">
@@ -19,6 +19,10 @@ export const HomePage: React.FC = () => {
       </header>
 
       <div className="home-links">
+        <Link to="/racing" className="home-card card">
+          <h2>Racing Typing</h2>
+          <p className="hint">Drive your car with WPM. Beat the ghost racer.</p>
+        </Link>
         <Link to="/duel" className="home-card card">
           <h2>Realtime duel</h2>
           <p className="hint">Race a friend in real time. Share a room ID and type the same passage.</p>
