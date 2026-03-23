@@ -1,36 +1,37 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { PRACTICE_TEXTS } from "./practiceTexts";
 
 const DURATIONS = [15, 30, 60, 120] as const;
+const LEVELS = ["easy", "medium", "hard"] as const;
+type Level = (typeof LEVELS)[number];
 
-const KEYS = "ASDFGHJKLQWERTYUIOPZXCVBNM";
-const randomKey = () => KEYS.charAt(Math.floor(Math.random() * KEYS.length));
-
-type Prompt = {
-  id: number;
-  text: string;
+const AI_WPM: Record<Level, { min: number; max: number }> = {
+  easy: { min: 24, max: 36 },
+  medium: { min: 40, max: 58 },
+  hard: { min: 62, max: 84 },
 };
 
-const makePrompt = (id: number): Prompt => {
-  const len = Math.random() < 0.75 ? 2 : 3;
-  let s = "";
-  for (let i = 0; i < len; i += 1) s += randomKey();
-  return { id, text: s };
-};
+const pickPassage = () => PRACTICE_TEXTS[Math.floor(Math.random() * PRACTICE_TEXTS.length)];
 
 export const KeyDrillPage: React.FC = () => {
   const [durationSeconds, setDurationSeconds] = useState<number>(30);
+  const [level, setLevel] = useState<Level>("easy");
   const [endTime, setEndTime] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
   const [finished, setFinished] = useState(false);
 
+  const [passage, setPassage] = useState<string>(() => pickPassage());
   const [typed, setTyped] = useState("");
-  const [hits, setHits] = useState(0);
-  const [misses, setMisses] = useState(0);
-  const [prompt, setPrompt] = useState<Prompt>(() => makePrompt(1));
+  const [computerChars, setComputerChars] = useState(0);
+  const [playerWpm, setPlayerWpm] = useState(0);
+  const [computerWpm, setComputerWpm] = useState(0);
+  const [startTime, setStartTime] = useState<number | null>(null);
 
-  const arenaRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const active = endTime != null && !finished;
+
+  const wordsInPassage = useMemo(() => passage.trim().split(/\s+/).length, [passage]);
 
   useEffect(() => {
     if (endTime == null) return;
@@ -43,86 +44,101 @@ export const KeyDrillPage: React.FC = () => {
       } else {
         setRemainingSeconds(Math.ceil(remainingMs / 1000));
       }
-    }, 250);
+    }, 150);
     return () => window.clearInterval(id);
   }, [endTime]);
+
+  useEffect(() => {
+    if (!active) return;
+    const profile = AI_WPM[level];
+    const id = window.setInterval(() => {
+      const targetWpm = profile.min + Math.random() * (profile.max - profile.min);
+      const charsPerSecond = (targetWpm * 5) / 60;
+      const nextChars = Math.min(passage.length, computerChars + charsPerSecond * 0.2);
+      setComputerChars(nextChars);
+      setComputerWpm(targetWpm);
+      if (nextChars >= passage.length) {
+        setFinished(true);
+        setRemainingSeconds((value) => value ?? 0);
+      }
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [active, level, passage.length, computerChars]);
 
   const start = () => {
     if (endTime != null) return;
     const now = Date.now();
+    setStartTime(now);
     setEndTime(now + durationSeconds * 1000);
     setRemainingSeconds(durationSeconds);
-    setFinished(false);
-    window.setTimeout(() => arenaRef.current?.focus(), 0);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const reset = () => {
+    setPassage(pickPassage());
+    setTyped("");
+    setComputerChars(0);
+    setPlayerWpm(0);
+    setComputerWpm(0);
+    setStartTime(null);
     setEndTime(null);
     setRemainingSeconds(null);
     setFinished(false);
-    setTyped("");
-    setHits(0);
-    setMisses(0);
-    setPrompt(makePrompt(1));
-    window.setTimeout(() => arenaRef.current?.focus(), 0);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const onType = (ch: string) => {
+  const handleChange = (value: string) => {
     if (finished) return;
     start();
-    const next = (typed + ch).slice(-8);
-    setTyped(next);
 
-    const target = prompt.text;
-    const recent = (next.toUpperCase().match(/[A-Z]+/g) ?? []).join("");
-    if (recent.endsWith(target)) {
-      setHits((h) => h + 1);
-      setPrompt((p) => makePrompt(p.id + 1));
-    } else {
-      // Lightly count misses when the user types a character that breaks prefix match.
-      const maxCheck = Math.min(target.length, recent.length);
-      const tail = recent.slice(-maxCheck);
-      const possiblePrefix = target.slice(0, tail.length);
-      if (tail !== possiblePrefix) setMisses((m) => m + 1);
+    const limited = value.slice(0, passage.length);
+    setTyped(limited);
+
+    if (startTime) {
+      const minutes = (Date.now() - startTime) / 1000 / 60;
+      const wordsTyped = limited.trim() ? limited.trim().split(/\s+/).length : 0;
+      setPlayerWpm(minutes > 0 ? wordsTyped / minutes : 0);
+    }
+
+    if (limited.length >= passage.length) {
+      setFinished(true);
     }
   };
 
-  useEffect(() => {
-    const el = arenaRef.current;
-    if (!el) return;
-    el.tabIndex = 0;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Backspace") return;
-      if (e.key.length !== 1) return;
-      const up = e.key.toUpperCase();
-      if (!/^[A-Z]$/.test(up)) return;
-      e.preventDefault();
-      onType(up);
-    };
-    el.addEventListener("keydown", handler);
-    return () => el.removeEventListener("keydown", handler);
-  }, [typed, finished, prompt.text]);
+  const playerProgress = Math.max(0, Math.min(1, typed.length / passage.length));
+  const computerProgress = Math.max(0, Math.min(1, computerChars / passage.length));
 
-  const minutes = durationSeconds / 60;
-  const wpm = minutes > 0 ? hits / minutes : 0;
-  const accuracy = hits + misses > 0 ? (hits / (hits + misses)) * 100 : 0;
+  const accuracy = useMemo(() => {
+    if (!typed.length) return 0;
+    let correct = 0;
+    for (let i = 0; i < typed.length; i += 1) {
+      if (typed[i] === passage[i]) correct += 1;
+    }
+    return (correct / typed.length) * 100;
+  }, [typed, passage]);
 
-  const remainingLabel =
-    remainingSeconds == null ? "Press any key to start." : `Remaining: ${remainingSeconds}s`;
-
-  const typedPretty = useMemo(() => typed.toUpperCase().replace(/[^A-Z]/g, ""), [typed]);
+  const winner = useMemo(() => {
+    if (!finished) return "";
+    if (playerProgress > computerProgress) return "You win";
+    if (computerProgress > playerProgress) return "Computer wins";
+    return "Draw";
+  }, [finished, playerProgress, computerProgress]);
 
   return (
     <div className="app-root">
       <header className="app-header">
         <div className="app-header-top">
           <div>
-            <h1>Key Drill</h1>
-            <p>Train finger speed with 2–3 letter combos. Type continuously; no backspace needed.</p>
+            <h1>Paragraph Race</h1>
+            <p>Type the same passage faster than the computer. Choose your level and race to the finish.</p>
           </div>
           <nav className="app-nav">
-            <Link to="/" className="nav-link">Home</Link>
-            <Link to="/dashboard" className="nav-link">Dashboard</Link>
+            <Link to="/" className="nav-link">
+              Home
+            </Link>
+            <Link to="/dashboard" className="nav-link">
+              Dashboard
+            </Link>
           </nav>
         </div>
       </header>
@@ -131,11 +147,7 @@ export const KeyDrillPage: React.FC = () => {
         <div className="form-row">
           <label>
             Time
-            <select
-              value={durationSeconds}
-              onChange={(e) => setDurationSeconds(Number(e.target.value) || 30)}
-              disabled={active}
-            >
+            <select value={durationSeconds} onChange={(e) => setDurationSeconds(Number(e.target.value) || 30)} disabled={active}>
               {DURATIONS.map((s) => (
                 <option key={s} value={s}>
                   {s < 60 ? `${s}s` : `${s / 60} min`}
@@ -143,46 +155,86 @@ export const KeyDrillPage: React.FC = () => {
               ))}
             </select>
           </label>
-          <button type="button" onClick={reset}>New run</button>
-          <span className="hint">{remainingLabel}</span>
+          <label>
+            Level
+            <select value={level} onChange={(e) => setLevel((e.target.value as Level) || "easy")} disabled={active}>
+              {LEVELS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" onClick={reset}>
+            New race
+          </button>
+          <span className="hint">
+            {remainingSeconds == null ? "Start typing to begin the paragraph race." : `Remaining: ${remainingSeconds}s · Passage: ${wordsInPassage} words`}
+          </span>
         </div>
       </section>
 
       <section className="layout layout-practice-only">
-        <div
-          ref={arenaRef}
-          className="card keydrill-arena"
-          role="application"
-          aria-label="Key drill game arena"
-          onClick={() => arenaRef.current?.focus()}
-        >
-          <div className="keydrill-top">
-            <div>
-              <div className="hint">Target</div>
-              <div className="keydrill-target">{prompt.text}</div>
+        <div className="card paragraph-race-arena">
+          <div className="paragraph-race-scoreboard">
+            <div className="paragraph-race-panel is-player">
+              <span className="paragraph-race-kicker">You</span>
+              <strong>{playerWpm.toFixed(0)} WPM</strong>
+              <small>Accuracy {accuracy.toFixed(0)}%</small>
             </div>
-            <div className="keydrill-stats">
-              <span>Hits: {hits}</span>
-              <span>Miss: {misses}</span>
-              <span>
-                WPM: {wpm.toFixed(1)} · Acc: {accuracy.toFixed(0)}%
-              </span>
+            <div className="paragraph-race-panel is-computer">
+              <span className="paragraph-race-kicker">Computer</span>
+              <strong>{computerWpm.toFixed(0)} WPM</strong>
+              <small>Level {level}</small>
             </div>
           </div>
 
-          <div className="keydrill-typed">
-            {typedPretty.length ? typedPretty : "TYPE ANY LETTER…"}
+          <div className="paragraph-race-track">
+            <div className="paragraph-race-track-row">
+              <span>You</span>
+              <div className="paragraph-race-bar">
+                <div className="is-player" style={{ width: `${playerProgress * 100}%` }} />
+              </div>
+            </div>
+            <div className="paragraph-race-track-row">
+              <span>CPU</span>
+              <div className="paragraph-race-bar">
+                <div className="is-computer" style={{ width: `${computerProgress * 100}%` }} />
+              </div>
+            </div>
           </div>
 
-          {finished && (
-            <p className="hint" style={{ marginTop: 10 }}>
-              Result: <strong>{wpm.toFixed(1)} WPM</strong> · Accuracy{" "}
-              <strong>{accuracy.toFixed(1)}%</strong>
-            </p>
+          <div className="paragraph-race-passage">
+            {passage.split("").map((char, index) => {
+              const state =
+                index >= typed.length ? "pending" : typed[index] === passage[index] ? "correct" : "wrong";
+              return (
+                <span key={index} className={`paragraph-race-char ${state}`}>
+                  {char}
+                </span>
+              );
+            })}
+          </div>
+
+          <textarea
+            ref={inputRef}
+            className="paragraph-race-input typing-input"
+            value={typed}
+            onChange={(e) => handleChange(e.target.value)}
+            placeholder="Start typing the paragraph..."
+            disabled={finished}
+            autoFocus
+          />
+
+          {winner && (
+            <div className="paragraph-race-result">
+              <p>
+                <strong>{winner}</strong> · You {playerWpm.toFixed(1)} WPM · Computer {computerWpm.toFixed(1)} WPM
+              </p>
+            </div>
           )}
         </div>
       </section>
     </div>
   );
 };
-

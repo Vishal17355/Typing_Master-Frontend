@@ -23,15 +23,6 @@ const DUEL_TEXT =
 const BACKEND_HTTP_URL =
   import.meta.env.VITE_BACKEND_URL ?? "https://typing-master-backend-production.up.railway.app";
 
-const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => {
-  const pct = Math.max(0, Math.min(1, progress)) * 100;
-  return (
-    <div className="progress-bar">
-      <div className="progress-bar-fill" style={{ width: `${pct}%` }} />
-    </div>
-  );
-};
-
 export const DuelPage: React.FC = () => {
   const [roomId, setRoomId] = useState("");
   const [username, setUsername] = useState("");
@@ -42,60 +33,26 @@ export const DuelPage: React.FC = () => {
   const [duelDurationSeconds, setDuelDurationSeconds] = useState<number>(60);
   const [duelEndTime, setDuelEndTime] = useState<number | null>(null);
   const [duelRemainingSeconds, setDuelRemainingSeconds] = useState<number | null>(null);
-  const [focusMode, setFocusMode] = useState(false);
   const clientRef = useRef<Client | null>(null);
 
   const activeText = DUEL_TEXT;
-
-  const { passageLines, lineStartCharIndices } = useMemo(() => {
-    const words = activeText.split(/\s+/).filter(Boolean);
-    const maxWordsPerLine = 8;
-    const lines: string[] = [];
-    const charStarts: number[] = [];
-    let cursor = 0;
-    let charOffset = 0;
-    while (cursor < words.length) {
-      charStarts.push(charOffset);
-      const slice = words.slice(cursor, cursor + maxWordsPerLine);
-      const lineStr = slice.join(" ");
-      lines.push(lineStr);
-      charOffset += lineStr.length;
-      cursor += slice.length;
-    }
-    return { passageLines: lines, lineStartCharIndices: charStarts };
-  }, [activeText]);
 
   const myState = useMemo(
     () => (username && roomState ? roomState.players[username] : undefined),
     [roomState, username]
   );
 
-  const typedWordsCount = useMemo(
-    () =>
-      currentInput.trim().length === 0
-        ? 0
-        : currentInput.trim().split(/\s+/).length,
-    [currentInput]
-  );
-
-  const wordsPerLine = useMemo(() => {
-    return passageLines.map((line) => line.split(/\s+/).filter(Boolean).length);
-  }, [passageLines]);
-
-  const currentLineIndex = useMemo(() => {
-    if (wordsPerLine.length === 0) return 0;
-    let remaining = typedWordsCount;
-    for (let i = 0; i < wordsPerLine.length; i += 1) {
-      if (remaining < wordsPerLine[i]) return i;
-      remaining -= wordsPerLine[i];
+  const progress = myState?.progress ?? Math.min(currentInput.length / activeText.length, 1);
+  const streak = Math.max(0, currentInput.length - Math.floor((1 - progress) * 8));
+  const accuracy = useMemo(() => {
+    if (!currentInput.length) return 0;
+    let correct = 0;
+    const maxLen = Math.max(activeText.length, currentInput.length);
+    for (let i = 0; i < maxLen; i += 1) {
+      if (currentInput[i] === activeText[i]) correct += 1;
     }
-    return wordsPerLine.length - 1;
-  }, [typedWordsCount, wordsPerLine]);
-
-  const visibleLines = useMemo(
-    () => passageLines.slice(currentLineIndex, currentLineIndex + 3),
-    [passageLines, currentLineIndex]
-  );
+    return (correct / maxLen) * 100;
+  }, [activeText, currentInput]);
 
   useEffect(() => {
     if (duelEndTime == null) return;
@@ -125,7 +82,7 @@ export const DuelPage: React.FC = () => {
     if (clientRef.current?.active) {
       clientRef.current.publish({
         destination: "/app/room.join",
-        body: JSON.stringify({ roomId, username })
+        body: JSON.stringify({ roomId, username }),
       });
       setJoined(true);
       setStartTime(null);
@@ -136,7 +93,7 @@ export const DuelPage: React.FC = () => {
     const client = new Client({
       webSocketFactory: () => sock as unknown as WebSocket,
       reconnectDelay: 5000,
-      debug: () => {}
+      debug: () => {},
     });
     client.onConnect = () => {
       client.subscribe(`/topic/room.${roomId}`, (message) => {
@@ -144,7 +101,7 @@ export const DuelPage: React.FC = () => {
       });
       client.publish({
         destination: "/app/room.join",
-        body: JSON.stringify({ roomId, username })
+        body: JSON.stringify({ roomId, username }),
       });
       setJoined(true);
       setStartTime(null);
@@ -157,31 +114,27 @@ export const DuelPage: React.FC = () => {
     client.activate();
   };
 
-  const sendTypingUpdate = (progress: number, wpm: number, finished: boolean) => {
+  const sendTypingUpdate = (nextProgress: number, nextWpm: number, finished: boolean) => {
     if (!clientRef.current?.connected || !roomId || !username) return;
     clientRef.current.publish({
       destination: "/app/room.update",
-      body: JSON.stringify({ roomId, username, progress, wpm, finished })
+      body: JSON.stringify({ roomId, username, progress: nextProgress, wpm: nextWpm, finished }),
     });
   };
 
   const handleInputChange = (value: string) => {
     setCurrentInput(value);
+    const now = Date.now();
     if (!startTime) {
-      const now = Date.now();
       setStartTime(now);
       setDuelEndTime(now + duelDurationSeconds * 1000);
       setDuelRemainingSeconds(duelDurationSeconds);
-      setFocusMode(true);
     }
-    const progress = Math.min(value.length / activeText.length, 1);
-    let wpm = 0;
-    if (startTime) {
-      const minutes = (Date.now() - startTime) / 1000 / 60;
-      const wordsTyped = value.trim().split(/\s+/).length;
-      wpm = minutes > 0 ? wordsTyped / minutes : 0;
-    }
-    sendTypingUpdate(progress, wpm, progress >= 1);
+    const nextProgress = Math.min(value.length / activeText.length, 1);
+    const minutes = startTime ? (now - startTime) / 1000 / 60 : 0;
+    const wordsTyped = value.trim().length === 0 ? 0 : value.trim().split(/\s+/).length;
+    const wpm = minutes > 0 ? wordsTyped / minutes : 0;
+    sendTypingUpdate(nextProgress, wpm, nextProgress >= 1);
   };
 
   const opponentStates = useMemo(() => {
@@ -194,200 +147,212 @@ export const DuelPage: React.FC = () => {
     setStartTime(null);
     setDuelEndTime(null);
     setDuelRemainingSeconds(null);
-    setFocusMode(false);
   };
 
-  const duelTimeLabel =
-    duelRemainingSeconds != null ? `${duelRemainingSeconds}s` : `${duelDurationSeconds}s`;
-
-  if (focusMode) {
-    const progress = myState?.progress ?? 0;
-    return (
-      <div className="duel-focus-screen">
-        <div className="duel-focus-inner">
-          <div className="duel-focus-top">
-            <span className="duel-focus-room">Room: {roomId || "—"}</span>
-            <span className="duel-focus-timer">{duelTimeLabel}</span>
-          </div>
-          <div className="duel-focus-text">
-            {visibleLines.map((line, idx) => {
-              const lineIndex = currentLineIndex + idx;
-              const startChar = lineStartCharIndices[lineIndex] ?? 0;
-              return (
-                <p
-                  key={`${lineIndex}`}
-                  className={idx === 0 ? "sample-line current" : "sample-line"}
-                >
-                  {line.split("").map((char, charIdx) => {
-                    const globalIdx = startChar + charIdx;
-                    const state =
-                      globalIdx >= currentInput.length
-                        ? "pending"
-                        : currentInput[globalIdx] === activeText[globalIdx]
-                          ? "correct"
-                          : "wrong";
-                    return (
-                      <span
-                        key={`${lineIndex}-${charIdx}`}
-                        className={`sample-char ${state}`}
-                      >
-                        {char}
-                      </span>
-                    );
-                  })}
-                </p>
-              );
-            })}
-          </div>
-          <textarea
-            className="typing-input duel-focus-input"
-            value={currentInput}
-            onChange={(e) => handleInputChange(e.target.value)}
-            placeholder={joined ? "Start typing..." : "Join a room first."}
-            disabled={!joined}
-            autoFocus
-          />
-          <div className="duel-focus-bottom">
-            <span>Progress: {(progress * 100).toFixed(0)}%</span>
-            <button type="button" className="mode-button" onClick={resetDuel}>
-              Exit focus mode
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="app-root">
-      <header className="app-header">
-        <div className="app-header-top">
-          <h1>Realtime duel</h1>
-          <nav className="app-nav">
-            <Link to="/" className="nav-link">Home</Link>
-            <Link to="/dashboard" className="nav-link">Dashboard</Link>
-          </nav>
+    <div className="duel-terminal">
+      <aside className="duel-sidebar">
+        <div className="duel-sidebar-brand">NEON_PRECISION</div>
+        <div className="duel-sidebar-group">
+          <span className="duel-kicker">Main Command</span>
+          <Link to="/" className="duel-sidebar-link">
+            ARENA
+          </Link>
+          <Link to="/duel" className="duel-sidebar-link active">
+            SQUAD_ROOM
+          </Link>
+          <Link to="/dashboard" className="duel-sidebar-link">
+            TECH_LAB
+          </Link>
+          <Link to="/modes" className="duel-sidebar-link">
+            LEADERBOARD
+          </Link>
         </div>
-      </header>
-
-      <section className="card">
-        <h2>Room & Player</h2>
-        <div className="form-row">
-          <label>
-            Room ID
-            <input
-              type="text"
-              value={roomId}
-              onChange={(e) => setRoomId(e.target.value.trim())}
-              placeholder="e.g. room-123"
-            />
-          </label>
-          <label>
-            Username
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value.trim())}
-              placeholder="Your name"
-            />
-          </label>
-          <label>
-            Duel time
-            <select
-              value={duelDurationSeconds}
-              onChange={(e) => setDuelDurationSeconds(Number(e.target.value) || 60)}
-            >
-              {DUEL_DURATIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s < 60 ? `${s}s` : `${s / 60} min`}
-                </option>
-              ))}
-            </select>
-          </label>
+        <div className="duel-sidebar-operator">
+          <div>
+            <strong>OPERATOR_01</strong>
+            <span>RANK: PLATINUM</span>
+          </div>
           <button type="button" onClick={connectAndJoin}>
-            {joined ? "Re-join room" : "Join room"}
+            START_DUEL
           </button>
         </div>
-        <p className="hint">
-          Both players use the same room ID and choose the same duel time. When you start typing,
-          the screen will switch to a distraction-free mode.
-        </p>
-      </section>
+      </aside>
 
-      <section className="layout">
-        <div className="card passage-card">
-          <h2>Passage</h2>
-          <div className="sample-text">
-            {visibleLines.map((line, idx) => {
-              const lineIndex = currentLineIndex + idx;
-              const startChar = lineStartCharIndices[lineIndex] ?? 0;
-              return (
-                <p
-                  key={`${lineIndex}`}
-                  className={idx === 0 ? "sample-line current" : "sample-line"}
-                >
-                  {line.split("").map((char, charIdx) => {
-                    const globalIdx = startChar + charIdx;
-                    const state =
-                      globalIdx >= currentInput.length
-                        ? "pending"
-                        : currentInput[globalIdx] === activeText[globalIdx]
-                          ? "correct"
-                          : "wrong";
-                    return (
-                      <span key={`${lineIndex}-${charIdx}`} className={`sample-char ${state}`}>
-                        {char}
-                      </span>
-                    );
-                  })}
-                </p>
-              );
-            })}
+      <main className="duel-main">
+        <header className="duel-topbar">
+          <div>
+            <h1>DUEL_SESSION_#492</h1>
+            <p>STATUS: {joined ? "OPERATORS_CONNECTED" : "WAITING_FOR_OPERATORS"} // SERVER: US_EAST_V2</p>
           </div>
-          <textarea
-            className="typing-input"
-            value={currentInput}
-            onChange={(e) => handleInputChange(e.target.value)}
-            placeholder={joined ? "Start typing..." : "Join a room first."}
-            disabled={!joined}
-          />
-        </div>
-        <div className="card">
-          <h2>Live status</h2>
-          <div className="status-section">
-            <h3>You</h3>
-            <ProgressBar progress={myState?.progress ?? 0} />
-            <div className="stats-row">
-              <span>WPM: {myState?.wpm.toFixed(1) ?? "0.0"}</span>
-              <span>Progress: {((myState?.progress ?? 0) * 100).toFixed(0)}%</span>
-              <span>{myState?.finished ? "Finished!" : joined ? "Racing..." : "—"}</span>
+          <div className="duel-command-bar">
+            <div>
+              <span>PING</span>
+              <strong>14MS</strong>
+            </div>
+            <div>
+              <span>WREATHS</span>
+              <strong>12</strong>
             </div>
           </div>
-          <div className="status-section">
-            <h3>Opponents</h3>
-            {opponentStates.length === 0 && (
-              <p className="hint">Waiting for someone else to join…</p>
-            )}
-            {opponentStates.map((p) => (
-              <div key={p.username} className="opponent-card">
-                <div className="opponent-header">
-                  <strong>{p.username}</strong>
-                  <span>{p.finished ? "Finished" : "Typing…"}</span>
+        </header>
+
+        <div className="duel-grid">
+          <section className="duel-stage">
+            <div className="duel-config-card">
+              <div className="duel-section-title">
+                <span />
+                <h2>MISSION_CONFIG</h2>
+              </div>
+              <div className="duel-config-grid">
+                <label>
+                  <span>ROOM_ID</span>
+                  <input
+                    type="text"
+                    value={roomId}
+                    onChange={(e) => setRoomId(e.target.value.trim())}
+                    placeholder="Enter ID..."
+                  />
+                </label>
+                <label>
+                  <span>PLAYER_ALIAS</span>
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.trim())}
+                    placeholder="Operator"
+                  />
+                </label>
+                <label>
+                  <span>DUEL_TIME</span>
+                  <select
+                    value={duelDurationSeconds}
+                    onChange={(e) => setDuelDurationSeconds(Number(e.target.value) || 60)}
+                  >
+                    {DUEL_DURATIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s < 60 ? `${s}s` : `${s / 60} min`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" className="duel-primary-button" onClick={connectAndJoin}>
+                  {joined ? "REJOIN_SESSION" : "JOIN_SESSION"}
+                </button>
+              </div>
+            </div>
+
+            <section className="duel-workspace">
+              <div className="duel-workspace-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span className="live" />
+              </div>
+              <div className="duel-workspace-copy">
+                {activeText.split("").map((char, index) => {
+                  let state = "pending";
+                  if (index < currentInput.length) {
+                    state = currentInput[index] === activeText[index] ? "correct" : "wrong";
+                  } else if (index === currentInput.length) {
+                    state = "active";
+                  }
+                  return (
+                    <span key={index} className={`duel-char ${state}`}>
+                      {char}
+                    </span>
+                  );
+                })}
+              </div>
+
+              <textarea
+                className="duel-workspace-input"
+                value={currentInput}
+                onChange={(e) => handleInputChange(e.target.value)}
+                placeholder={joined ? "Start typing..." : "Join a room first."}
+                disabled={!joined}
+              />
+
+              <div className="duel-metrics-row">
+                <div>
+                  <span>LIVE_WPM</span>
+                  <strong>{myState?.wpm.toFixed(0) ?? "0"}</strong>
                 </div>
-                <ProgressBar progress={p.progress} />
-                <div className="stats-row small">
-                  <span>WPM: {p.wpm.toFixed(1)}</span>
-                  <span>Progress: {(p.progress * 100).toFixed(0)}%</span>
+                <div>
+                  <span>ACCURACY</span>
+                  <strong>{accuracy.toFixed(1)}%</strong>
+                </div>
+                <div>
+                  <span>STREAK</span>
+                  <strong>{streak}</strong>
+                </div>
+                <div>
+                  <span>TIMER</span>
+                  <strong>{duelRemainingSeconds ?? duelDurationSeconds}s</strong>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+            </section>
+          </section>
 
-      <footer className="footer">
-        <Link to="/" className="nav-link">Home</Link>
-      </footer>
+          <aside className="duel-sidepanel">
+            <section className="duel-opponents-card">
+              <div className="duel-side-head">
+                <h3>LIVE_OPPONENTS</h3>
+                <span>{opponentStates.length + (joined ? 1 : 0)}_ACTIVE</span>
+              </div>
+
+              <div className="duel-player-card self">
+                <div className="duel-player-head">
+                  <strong>{username || "OPERATOR_01"} (YOU)</strong>
+                  <span>{myState?.wpm.toFixed(0) ?? "0"} WPM</span>
+                </div>
+                <div className="duel-progress">
+                  <div style={{ width: `${progress * 100}%` }} />
+                </div>
+              </div>
+
+              {opponentStates.length === 0 && <p className="hint">Waiting for opponent telemetry...</p>}
+
+              {opponentStates.map((player) => (
+                <div key={player.username} className="duel-player-card">
+                  <div className="duel-player-head">
+                    <strong>{player.username}</strong>
+                    <span>{player.wpm.toFixed(0)} WPM</span>
+                  </div>
+                  <div className="duel-progress ghost">
+                    <div style={{ width: `${player.progress * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <section className="duel-telemetry-card">
+              <h3>PERFORMANCE_TELEMETRY</h3>
+              <div className="duel-telemetry-row">
+                <span>Peak Velocity</span>
+                <strong>142 WPM</strong>
+              </div>
+              <div className="duel-telemetry-row">
+                <span>Error Density</span>
+                <strong className="danger">{(100 - accuracy).toFixed(1)}%</strong>
+              </div>
+              <div className="duel-telemetry-row">
+                <span>Rank Percentile</span>
+                <strong className="success">TOP 2%</strong>
+              </div>
+              <div className="duel-prediction">AI_PREDICTION: ESTIMATED_WIN_CHANCE: 84%</div>
+            </section>
+
+            <div className="duel-actions">
+              <button type="button" className="duel-reset-button" onClick={resetDuel}>
+                RESET_INPUT
+              </button>
+              <Link to="/" className="duel-home-link">
+                EXIT_ARENA
+              </Link>
+            </div>
+          </aside>
+        </div>
+      </main>
     </div>
   );
 };
