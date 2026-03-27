@@ -33,26 +33,38 @@ export const FallingWordsPage: React.FC = () => {
 
   const idRef = useRef(0);
   const arenaRef = useRef<HTMLDivElement>(null);
+  const typedRef = useRef("");
+  const endTimeRef = useRef<number | null>(null);
+  const finishedRef = useRef(false);
+  const gameOverRef = useRef(false);
 
   const active = endTime != null && !finished && !gameOver;
 
   const start = () => {
-    if (endTime != null) return;
+    if (endTimeRef.current != null) return;
     const now = Date.now();
-    setEndTime(now + durationSeconds * 1000);
+    const nextEndTime = now + durationSeconds * 1000;
+    endTimeRef.current = nextEndTime;
+    setEndTime(nextEndTime);
     setRemainingSeconds(durationSeconds);
     setFinished(false);
     setGameOver(false);
+    finishedRef.current = false;
+    gameOverRef.current = false;
     window.setTimeout(() => arenaRef.current?.focus(), 0);
   };
 
   const reset = () => {
     setItems([]);
+    typedRef.current = "";
     setTyped("");
     setScore(0);
     setMisses(0);
     setGameOver(false);
     setFinished(false);
+    finishedRef.current = false;
+    gameOverRef.current = false;
+    endTimeRef.current = null;
     setEndTime(null);
     setRemainingSeconds(null);
     window.setTimeout(() => arenaRef.current?.focus(), 0);
@@ -65,6 +77,7 @@ export const FallingWordsPage: React.FC = () => {
       if (remainingMs <= 0) {
         setRemainingSeconds(0);
         setFinished(true);
+        finishedRef.current = true;
         window.clearInterval(id);
       } else {
         setRemainingSeconds(Math.ceil(remainingMs / 1000));
@@ -104,7 +117,10 @@ export const FallingWordsPage: React.FC = () => {
           if (y >= 1.02) {
             setMisses((m) => {
               const nm = m + 1;
-              if (nm >= MISS_LIMIT) setGameOver(true);
+              if (nm >= MISS_LIMIT) {
+                gameOverRef.current = true;
+                setGameOver(true);
+              }
               return nm;
             });
             continue;
@@ -134,12 +150,13 @@ export const FallingWordsPage: React.FC = () => {
 
   const handleKey = useCallback(
     (e: KeyboardEvent) => {
-      if (finished || gameOver) return;
-      start();
+      if (finishedRef.current || gameOverRef.current) return;
+      if (endTimeRef.current == null) start();
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
-        const w = typed.trim();
+        const w = typedRef.current.trim();
         if (w) popByWord(w);
+        typedRef.current = "";
         setTyped("");
         return;
       }
@@ -148,11 +165,13 @@ export const FallingWordsPage: React.FC = () => {
         const ch = e.key;
         if (/^[a-zA-Z]$/.test(ch)) {
           e.preventDefault();
-          setTyped((t) => (t + ch).slice(0, 24));
+          const next = (typedRef.current + ch).slice(0, 24);
+          typedRef.current = next;
+          setTyped(next);
         }
       }
     },
-    [finished, gameOver, popByWord, typed]
+    [popByWord]
   );
 
   useEffect(() => {

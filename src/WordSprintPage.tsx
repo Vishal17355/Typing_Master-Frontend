@@ -21,6 +21,10 @@ export const WordSprintPage: React.FC = () => {
   const [typedWords, setTypedWords] = useState(0);
   const [mistakes, setMistakes] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const currentInputRef = useRef("");
+  const typedWordsRef = useRef(0);
+  const mistakesRef = useRef(0);
+  const startTimeRef = useRef<number | null>(null);
 
   const words = useMemo(() => pickWords(220), []);
   const targetIndex = typedWords;
@@ -46,6 +50,7 @@ export const WordSprintPage: React.FC = () => {
   const startIfNeeded = () => {
     if (endTime != null) return;
     const now = Date.now();
+    startTimeRef.current = now;
     setEndTime(now + durationSeconds * 1000);
     setRemainingSeconds(durationSeconds);
     setFinished(false);
@@ -53,6 +58,10 @@ export const WordSprintPage: React.FC = () => {
   };
 
   const reset = () => {
+    currentInputRef.current = "";
+    typedWordsRef.current = 0;
+    mistakesRef.current = 0;
+    startTimeRef.current = null;
     setEndTime(null);
     setRemainingSeconds(null);
     setFinished(false);
@@ -62,35 +71,48 @@ export const WordSprintPage: React.FC = () => {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const handleChange = (value: string) => {
-    if (finished) return;
-    startIfNeeded();
+  const commitInput = (nextInput: string) => {
+    currentInputRef.current = nextInput;
+    setCurrentInput(nextInput);
+  };
 
-    if (!/[ \n\t]$/.test(value)) {
-      setCurrentInput(value);
-      return;
-    }
-
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setCurrentInput("");
-      return;
-    }
-
-    const parts = trimmed.split(/\s+/);
-    const last = parts[parts.length - 1] ?? "";
-    if (!last.length) {
-      setCurrentInput("");
-      return;
-    }
-
-    if (last.toLowerCase() === targetWord.toLowerCase()) {
-      setTypedWords((n) => n + 1);
+  const commitWord = () => {
+    const word = currentInputRef.current.trim();
+    if (!word) return;
+    if (word.toLowerCase() === targetWord.toLowerCase()) {
+      typedWordsRef.current += 1;
+      setTypedWords(typedWordsRef.current);
     } else {
-      setMistakes((m) => m + 1);
-      setTypedWords((n) => n + 1);
+      mistakesRef.current += 1;
+      typedWordsRef.current += 1;
+      setMistakes(mistakesRef.current);
+      setTypedWords(typedWordsRef.current);
     }
-    setCurrentInput("");
+    commitInput("");
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (finished) return;
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      if (!currentInputRef.current.length) return;
+      commitInput(currentInputRef.current.slice(0, -1));
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      startIfNeeded();
+      commitWord();
+      return;
+    }
+
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      startIfNeeded();
+      commitInput(`${currentInputRef.current}${event.key}`);
+    }
   };
 
   const minutes = durationSeconds / 60;
@@ -180,9 +202,10 @@ export const WordSprintPage: React.FC = () => {
                 ref={inputRef}
                 className="sprint-input"
                 value={currentInput}
-                onChange={(e) => handleChange(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="Start typing..."
                 disabled={finished}
+                readOnly
               />
               <div className="sprint-caret-chip">
                 <span className="sprint-caret" />

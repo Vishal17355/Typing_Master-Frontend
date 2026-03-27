@@ -16,6 +16,9 @@ export const RacingTypingPage: React.FC = () => {
   const [currentInput, setCurrentInput] = useState("");
   const [startTime, setStartTime] = useState<number | null>(null);
   const [passage, setPassage] = useState<string>(() => pickPassage());
+  const currentInputRef = React.useRef("");
+  const correctCharsRef = React.useRef(0);
+  const spaceCountRef = React.useRef(0);
 
   const text = useMemo(() => passage, [passage]);
 
@@ -36,6 +39,9 @@ export const RacingTypingPage: React.FC = () => {
 
   const resetRace = () => {
     setPassage(pickPassage());
+    currentInputRef.current = "";
+    correctCharsRef.current = 0;
+    spaceCountRef.current = 0;
     setCurrentInput("");
     setStartTime(null);
     setEndTime(null);
@@ -43,9 +49,32 @@ export const RacingTypingPage: React.FC = () => {
     setFinished(false);
   };
 
-  const handleChange = (value: string) => {
-    if (finished) return;
-    setCurrentInput(value);
+  const commitInput = (nextInput: string) => {
+    const previousInput = currentInputRef.current;
+
+    if (nextInput.length > previousInput.length) {
+      const insertedChar = nextInput[nextInput.length - 1];
+      const insertedIndex = nextInput.length - 1;
+      if (insertedChar === text[insertedIndex]) {
+        correctCharsRef.current += 1;
+      }
+      if (insertedChar === " " && previousInput.trim().length > 0 && previousInput[previousInput.length - 1] !== " ") {
+        spaceCountRef.current += 1;
+      }
+    } else if (nextInput.length < previousInput.length) {
+      const removedIndex = previousInput.length - 1;
+      const removedChar = previousInput[removedIndex];
+      if (removedChar === text[removedIndex]) {
+        correctCharsRef.current = Math.max(0, correctCharsRef.current - 1);
+      }
+      if (removedChar === " " && nextInput.trim().length > 0) {
+        spaceCountRef.current = Math.max(0, spaceCountRef.current - 1);
+      }
+    }
+
+    currentInputRef.current = nextInput;
+    setCurrentInput(nextInput);
+
     if (!startTime) {
       const now = Date.now();
       setStartTime(now);
@@ -54,19 +83,35 @@ export const RacingTypingPage: React.FC = () => {
     }
   };
 
-  const wordsTyped = currentInput.trim() ? currentInput.trim().split(/\s+/).length : 0;
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (finished) return;
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      if (!currentInputRef.current.length) return;
+      commitInput(currentInputRef.current.slice(0, -1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      commitInput(`${currentInputRef.current}${event.key}`);
+    }
+  };
+
+  const wordsTyped = currentInput.trim() ? spaceCountRef.current + 1 : 0;
   const elapsedMinutes =
     startTime != null ? (Date.now() - startTime) / 1000 / 60 : 0;
   const wpm =
     startTime != null && elapsedMinutes > 0 ? wordsTyped / elapsedMinutes : 0;
 
-  let correctChars = 0;
-  const maxLen = Math.min(currentInput.length, text.length);
-  for (let i = 0; i < maxLen; i += 1) {
-    if (currentInput[i] === text[i]) correctChars += 1;
-  }
   const totalChars = Math.max(text.length, currentInput.length || 1);
-  const accuracy = (correctChars / totalChars) * 100;
+  const accuracy = (correctCharsRef.current / totalChars) * 100;
 
   const playerProgress = Math.min(currentInput.length / text.length, 1);
   const ghostSpeed = 55; // ghost target WPM
@@ -181,10 +226,11 @@ export const RacingTypingPage: React.FC = () => {
           <textarea
             className="typing-input"
             value={currentInput}
-            onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Type here to drive your car…"
             autoFocus
             disabled={finished}
+            readOnly
           />
         </div>
       </section>

@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PRACTICE_TEXTS } from "./practiceTexts";
+import { PracticeResultOverlay, type PracticeResultSummary } from "./PracticeResultOverlay";
 
 const PRACTICE_RESULTS_STORAGE_KEY = "typing-practice-results";
 
@@ -98,8 +99,73 @@ const buildPracticeLines = (text: string, targetLength: number): PassageLine[] =
   return lines;
 };
 
+type PracticeVisibleLineProps = {
+  line: PassageLine;
+  lineIndex: number;
+  activeLineIndex: number;
+  currentInput: string;
+  practicePassage: string;
+  activeWordRange: { start: number; end: number };
+};
+
+const PracticeVisibleLine = memo(
+  ({
+    line,
+    lineIndex,
+    activeLineIndex,
+    currentInput,
+    practicePassage,
+    activeWordRange,
+  }: PracticeVisibleLineProps) => {
+    return (
+      <div className={`practice-simple-line${lineIndex === activeLineIndex ? " is-active" : ""}`}>
+        {line.text.split("").map((char, charIndex) => {
+          const index = line.start + charIndex;
+          let state = "pending";
+          if (index < currentInput.length) {
+            state = currentInput[index] === practicePassage[index] ? "correct" : "wrong";
+          }
+          const isFocusedWord = index >= activeWordRange.start && index < activeWordRange.end;
+          const isSpace = char === " ";
+          const isCaretStart = currentInput.length === 0 && index === 0;
+          const isCaretBeforeChar =
+            currentInput.length > 0 &&
+            currentInput[currentInput.length - 1] === " " &&
+            index === currentInput.length;
+          const isCaretAnchor =
+            currentInput.length > 0 &&
+            currentInput[currentInput.length - 1] !== " " &&
+            index === currentInput.length - 1;
+          const className = [
+            "practice-simple-char",
+            state,
+            isFocusedWord ? "focus-word" : "",
+            isCaretStart ? "caret-start" : "",
+            isCaretBeforeChar ? "caret-before-char" : "",
+            isCaretAnchor ? "caret-anchor" : "",
+            isSpace ? "is-space" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+
+          return (
+            <span key={index} className={className}>
+              {char}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+);
+PracticeVisibleLine.displayName = "PracticeVisibleLine";
+
 export const PracticePage: React.FC = () => {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const currentInputRef = useRef("");
+  const correctCharsRef = useRef(0);
+  const spaceCountRef = useRef(0);
+  const startTimeRef = useRef<number | null>(null);
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [practiceDurationSeconds, setPracticeDurationSeconds] = useState(30);
   const [practiceLevel, setPracticeLevel] = useState<PracticeLevel>("easy");
@@ -113,6 +179,8 @@ export const PracticePage: React.FC = () => {
   const [currentInput, setCurrentInput] = useState("");
   const [startTime, setStartTime] = useState<number | null>(null);
   const [startCountdown, setStartCountdown] = useState(3);
+  const [sessionSummary, setSessionSummary] = useState<PracticeResultSummary | null>(null);
+  const [autoAdvancePassage, setAutoAdvancePassage] = useState(false);
 
   const practicePassage = useMemo(() => {
     const rotated = [...PRACTICE_TEXTS.slice(practiceIndex), ...PRACTICE_TEXTS.slice(0, practiceIndex)];
@@ -152,26 +220,15 @@ export const PracticePage: React.FC = () => {
     return { start, end };
   }, [currentInput.length, practicePassage]);
 
-  const wordsTyped = useMemo(
-    () => (currentInput.trim() ? currentInput.trim().split(/\s+/).length : 0),
-    [currentInput]
-  );
+  const wordsTyped = currentInput.trim() ? spaceCountRef.current + 1 : 0;
 
   const liveWpm = useMemo(() => {
     if (!startTime || wordsTyped === 0) return 0;
     const minutes = (Date.now() - startTime) / 1000 / 60;
     return minutes > 0 ? wordsTyped / minutes : 0;
-  }, [startTime, wordsTyped, currentInput]);
+  }, [startTime, wordsTyped, currentInput.length]);
 
-  const accuracy = useMemo(() => {
-    if (!currentInput.length) return 0;
-    let correct = 0;
-    const maxLen = Math.max(practicePassage.length, currentInput.length);
-    for (let i = 0; i < maxLen; i += 1) {
-      if (currentInput[i] === practicePassage[i]) correct += 1;
-    }
-    return (correct / maxLen) * 100;
-  }, [currentInput, practicePassage]);
+  const accuracy = currentInput.length ? (correctCharsRef.current / currentInput.length) * 100 : 0;
 
   useEffect(() => {
     if (practiceEndTime == null) return;
@@ -179,6 +236,18 @@ export const PracticePage: React.FC = () => {
       const remainingMs = practiceEndTime - Date.now();
       if (remainingMs <= 0) {
         setPracticeRemainingSeconds(0);
+        const finalChars = currentInputRef.current.length;
+        const finalWords = currentInputRef.current.trim() ? spaceCountRef.current + 1 : 0;
+        const finalAccuracy = finalChars ? (correctCharsRef.current / finalChars) * 100 : 0;
+        const finalErrors = Math.max(0, finalChars - correctCharsRef.current);
+        const finalWpm = practiceDurationSeconds > 0 ? finalWords / (practiceDurationSeconds / 60) : 0;
+        setSessionSummary({
+          wpm: finalWpm,
+          accuracy: finalAccuracy,
+          errors: finalErrors,
+          charactersTyped: finalChars,
+          durationSeconds: practiceDurationSeconds,
+        });
         setPracticeFinished(true);
         setPracticeSaved(false);
         window.clearInterval(id);
@@ -192,15 +261,20 @@ export const PracticePage: React.FC = () => {
   useEffect(() => {
     if (!practiceFinished || practiceSaved) return;
     const now = new Date();
-    const minutes = practiceDurationSeconds / 60;
-    const wpm = minutes > 0 ? wordsTyped / minutes : 0;
+    const resultSummary = sessionSummary ?? {
+      wpm: 0,
+      accuracy: 0,
+      errors: 0,
+      charactersTyped: currentInput.length,
+      durationSeconds: practiceDurationSeconds,
+    };
     const result: PracticeResult = {
       id: `${now.getTime()}`,
       timestamp: now.toISOString(),
-      durationSeconds: practiceDurationSeconds,
-      wpm,
-      accuracy,
-      charactersTyped: currentInput.length,
+      durationSeconds: resultSummary.durationSeconds,
+      wpm: resultSummary.wpm,
+      accuracy: resultSummary.accuracy,
+      charactersTyped: resultSummary.charactersTyped,
       textSample: practicePassage.slice(0, 200),
     };
     try {
@@ -214,11 +288,27 @@ export const PracticePage: React.FC = () => {
       /* ignore */
     }
     setPracticeSaved(true);
-  }, [practiceFinished, practiceSaved, practiceDurationSeconds, accuracy, currentInput.length, practicePassage, wordsTyped]);
+  }, [practiceFinished, practiceSaved, practiceDurationSeconds, currentInput.length, practicePassage, sessionSummary]);
+
+  useEffect(() => {
+    if (!practiceFinished || !sessionSummary || !autoAdvancePassage) return;
+    const timeoutId = window.setTimeout(() => {
+      resetPractice(true);
+    }, 1400);
+    return () => window.clearTimeout(timeoutId);
+  }, [autoAdvancePassage, practiceFinished, sessionSummary]);
 
   useEffect(() => {
     setHistoryResults(readPracticeResults().slice(0, 12));
   }, []);
+
+  useEffect(() => {
+    currentInputRef.current = "";
+    correctCharsRef.current = 0;
+    spaceCountRef.current = 0;
+    startTimeRef.current = null;
+    setSessionSummary(null);
+  }, [practicePassage]);
 
   useEffect(() => {
     if (startCountdown <= 0) {
@@ -233,24 +323,74 @@ export const PracticePage: React.FC = () => {
     return () => window.clearTimeout(timeoutId);
   }, [startCountdown]);
 
-  const handleInputChange = (value: string) => {
-    if (practiceFinished || startCountdown > 0) return;
-    setCurrentInput(value);
+  const commitInput = (nextInput: string) => {
+    const prevInput = currentInputRef.current;
+
+    if (nextInput.length > prevInput.length) {
+      const insertedChar = nextInput[nextInput.length - 1];
+      const insertedIndex = nextInput.length - 1;
+      if (insertedChar === practicePassage[insertedIndex]) {
+        correctCharsRef.current += 1;
+      }
+      if (insertedChar === " " && prevInput.trim().length > 0 && prevInput[prevInput.length - 1] !== " ") {
+        spaceCountRef.current += 1;
+      }
+    } else if (nextInput.length < prevInput.length) {
+      const removedIndex = prevInput.length - 1;
+      const removedChar = prevInput[removedIndex];
+      if (removedChar === practicePassage[removedIndex]) {
+        correctCharsRef.current = Math.max(0, correctCharsRef.current - 1);
+      }
+      if (removedChar === " " && nextInput.trim().length > 0) {
+        spaceCountRef.current = Math.max(0, spaceCountRef.current - 1);
+      }
+    }
+
+    currentInputRef.current = nextInput;
+    setCurrentInput(nextInput);
+
     if (!startTime) {
       const now = Date.now();
+      startTimeRef.current = now;
       setStartTime(now);
       setPracticeEndTime(now + practiceDurationSeconds * 1000);
       setPracticeRemainingSeconds(practiceDurationSeconds);
     }
   };
 
+  const handleInputKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (practiceFinished || startCountdown > 0) return;
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      if (!currentInputRef.current.length) return;
+      commitInput(currentInputRef.current.slice(0, -1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      commitInput(`${currentInputRef.current}${event.key}`);
+    }
+  };
+
   const resetPractice = (rotatePassage = true) => {
+    currentInputRef.current = "";
+    correctCharsRef.current = 0;
+    spaceCountRef.current = 0;
+    startTimeRef.current = null;
     setCurrentInput("");
     setStartTime(null);
     setPracticeEndTime(null);
     setPracticeRemainingSeconds(null);
     setPracticeFinished(false);
     setPracticeSaved(false);
+    setSessionSummary(null);
     setStartCountdown(3);
     if (rotatePassage) {
       setPracticeIndex((value) => (value + 1) % PRACTICE_TEXTS.length);
@@ -396,116 +536,41 @@ export const PracticePage: React.FC = () => {
               {visibleLines.map((line, visibleIndex) => {
                 const lineIndex = visibleLineStart + visibleIndex;
                 return (
-                <div
-                  key={`${line.start}-${line.end}`}
-                  className={`practice-simple-line${lineIndex === activeLineIndex ? " is-active" : ""}`}
-                >
-                  {line.text.split("").map((char, charIndex) => {
-                    const index = line.start + charIndex;
-                    let state = "pending";
-                    if (index < currentInput.length) {
-                      state = currentInput[index] === practicePassage[index] ? "correct" : "wrong";
-                    }
-                    const isFocusedWord = index >= activeWordRange.start && index < activeWordRange.end;
-                    const isSpace = char === " ";
-                    const isCaretStart = currentInput.length === 0 && index === 0;
-                    const isCaretBeforeChar =
-                      currentInput.length > 0 &&
-                      currentInput[currentInput.length - 1] === " " &&
-                      index === currentInput.length;
-                    const isCaretAnchor =
-                      currentInput.length > 0 &&
-                      currentInput[currentInput.length - 1] !== " " &&
-                      index === currentInput.length - 1;
-                    const className = [
-                      "practice-simple-char",
-                      state,
-                      isFocusedWord ? "focus-word" : "",
-                      isCaretStart ? "caret-start" : "",
-                      isCaretBeforeChar ? "caret-before-char" : "",
-                      isCaretAnchor ? "caret-anchor" : "",
-                      isSpace ? "is-space" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ");
-
-                    return (
-                      <span key={index} className={className}>
-                        {char}
-                      </span>
-                    );
-                  })}
-                </div>
-              )})}
+                  <PracticeVisibleLine
+                    key={`${line.start}-${line.end}`}
+                    line={line}
+                    lineIndex={lineIndex}
+                    activeLineIndex={activeLineIndex}
+                    currentInput={currentInput}
+                    practicePassage={practicePassage}
+                    activeWordRange={activeWordRange}
+                  />
+                );
+              })}
             </div>
 
-            <textarea
+              <textarea
               ref={inputRef}
               className="practice-simple-input"
               value={currentInput}
-              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleInputKeyDown}
               placeholder="Start typing"
               disabled={practiceFinished}
+              readOnly
               autoFocus
               spellCheck={false}
             />
           </div>
         </section>
 
-        {practiceFinished ? (
-          <section className="practice-dashboard">
-            <div className="practice-dashboard-head">
-              <div>
-                <span className="practice-dashboard-kicker">session complete</span>
-                <h2>Solo Practice Report</h2>
-              </div>
-              <button type="button" className="practice-simple-link" onClick={() => resetPractice()}>
-                restart test
-              </button>
-            </div>
-
-            <div className="practice-dashboard-grid">
-              <article className="practice-dashboard-card">
-                <span>speed</span>
-                <strong>{liveWpm.toFixed(1)} wpm</strong>
-                <small>{speedDelta >= 0 ? "+" : ""}{speedDelta.toFixed(1)} vs recent avg</small>
-              </article>
-              <article className="practice-dashboard-card">
-                <span>accuracy</span>
-                <strong>{accuracy.toFixed(1)}%</strong>
-                <small>{currentInput.length - errors} correct chars</small>
-              </article>
-              <article className="practice-dashboard-card">
-                <span>mistakes</span>
-                <strong>{errors}</strong>
-                <small>{currentInput.length} chars typed</small>
-              </article>
-              <article className="practice-dashboard-card">
-                <span>difficulty</span>
-                <strong>{practiceLevel}</strong>
-                <small>{practiceDurationSeconds}s session</small>
-              </article>
-            </div>
-
-            <div className="practice-dashboard-chart">
-              <div className="practice-dashboard-chart-head">
-                <span>recent speed history</span>
-                <small>saved WPM comparison</small>
-              </div>
-              <div className="practice-dashboard-bars">
-                {latestResults.map((result) => (
-                  <div key={result.id} className="practice-dashboard-bar-wrap">
-                    <span
-                      className="practice-dashboard-bar"
-                      style={{ height: `${Math.max(16, (result.wpm / peakWpm) * 100)}%` }}
-                      title={`${result.wpm.toFixed(1)} WPM`}
-                    />
-                    <small>{Math.round(result.wpm)}</small>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
+        {practiceFinished && sessionSummary ? (
+          <PracticeResultOverlay
+            summary={sessionSummary}
+            onRestart={() => resetPractice(false)}
+            onNewPassage={() => resetPractice(true)}
+            autoAdvanceEnabled={autoAdvancePassage}
+            onToggleAutoAdvance={() => setAutoAdvancePassage((value) => !value)}
+          />
         ) : (
           <footer className="practice-simple-footer">
             <button type="button" className="practice-simple-link" onClick={() => resetPractice()}>

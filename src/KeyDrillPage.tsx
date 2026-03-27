@@ -29,6 +29,9 @@ export const KeyDrillPage: React.FC = () => {
   const [startTime, setStartTime] = useState<number | null>(null);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const typedRef = useRef("");
+  const correctCharsRef = useRef(0);
+  const spaceCountRef = useRef(0);
   const active = endTime != null && !finished;
 
   const wordsInPassage = useMemo(() => passage.trim().split(/\s+/).length, [passage]);
@@ -54,16 +57,18 @@ export const KeyDrillPage: React.FC = () => {
     const id = window.setInterval(() => {
       const targetWpm = profile.min + Math.random() * (profile.max - profile.min);
       const charsPerSecond = (targetWpm * 5) / 60;
-      const nextChars = Math.min(passage.length, computerChars + charsPerSecond * 0.2);
-      setComputerChars(nextChars);
+      setComputerChars((value) => {
+        const nextChars = Math.min(passage.length, value + charsPerSecond * 0.2);
+        if (nextChars >= passage.length) {
+          setFinished(true);
+          setRemainingSeconds((current) => current ?? 0);
+        }
+        return nextChars;
+      });
       setComputerWpm(targetWpm);
-      if (nextChars >= passage.length) {
-        setFinished(true);
-        setRemainingSeconds((value) => value ?? 0);
-      }
     }, 200);
     return () => window.clearInterval(id);
-  }, [active, level, passage.length, computerChars]);
+  }, [active, level, passage.length]);
 
   const start = () => {
     if (endTime != null) return;
@@ -77,6 +82,9 @@ export const KeyDrillPage: React.FC = () => {
   const reset = () => {
     setPassage(pickPassage());
     setTyped("");
+    typedRef.current = "";
+    correctCharsRef.current = 0;
+    spaceCountRef.current = 0;
     setComputerChars(0);
     setPlayerWpm(0);
     setComputerWpm(0);
@@ -87,16 +95,36 @@ export const KeyDrillPage: React.FC = () => {
     window.setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const handleChange = (value: string) => {
-    if (finished) return;
-    start();
+  const commitTyped = (nextTyped: string) => {
+    const previousTyped = typedRef.current;
+    const limited = nextTyped.slice(0, passage.length);
 
-    const limited = value.slice(0, passage.length);
+    if (limited.length > previousTyped.length) {
+      const insertedChar = limited[limited.length - 1];
+      const insertedIndex = limited.length - 1;
+      if (insertedChar === passage[insertedIndex]) {
+        correctCharsRef.current += 1;
+      }
+      if (insertedChar === " " && previousTyped.trim().length > 0 && previousTyped[previousTyped.length - 1] !== " ") {
+        spaceCountRef.current += 1;
+      }
+    } else if (limited.length < previousTyped.length) {
+      const removedIndex = previousTyped.length - 1;
+      const removedChar = previousTyped[removedIndex];
+      if (removedChar === passage[removedIndex]) {
+        correctCharsRef.current = Math.max(0, correctCharsRef.current - 1);
+      }
+      if (removedChar === " " && limited.trim().length > 0) {
+        spaceCountRef.current = Math.max(0, spaceCountRef.current - 1);
+      }
+    }
+
+    typedRef.current = limited;
     setTyped(limited);
 
     if (startTime) {
       const minutes = (Date.now() - startTime) / 1000 / 60;
-      const wordsTyped = limited.trim() ? limited.trim().split(/\s+/).length : 0;
+      const wordsTyped = limited.trim() ? spaceCountRef.current + 1 : 0;
       setPlayerWpm(minutes > 0 ? wordsTyped / minutes : 0);
     }
 
@@ -105,17 +133,32 @@ export const KeyDrillPage: React.FC = () => {
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (finished) return;
+
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      if (!typedRef.current.length) return;
+      commitTyped(typedRef.current.slice(0, -1));
+      return;
+    }
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      start();
+      commitTyped(`${typedRef.current}${event.key}`);
+    }
+  };
+
   const playerProgress = Math.max(0, Math.min(1, typed.length / passage.length));
   const computerProgress = Math.max(0, Math.min(1, computerChars / passage.length));
 
-  const accuracy = useMemo(() => {
-    if (!typed.length) return 0;
-    let correct = 0;
-    for (let i = 0; i < typed.length; i += 1) {
-      if (typed[i] === passage[i]) correct += 1;
-    }
-    return (correct / typed.length) * 100;
-  }, [typed, passage]);
+  const accuracy = typed.length ? (correctCharsRef.current / typed.length) * 100 : 0;
 
   const winner = useMemo(() => {
     if (!finished) return "";
@@ -220,9 +263,10 @@ export const KeyDrillPage: React.FC = () => {
             ref={inputRef}
             className="paragraph-race-input typing-input"
             value={typed}
-            onChange={(e) => handleChange(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Start typing the paragraph..."
             disabled={finished}
+            readOnly
             autoFocus
           />
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 
 type HomePageProps = {
   onLogout: () => void;
@@ -18,13 +18,13 @@ type ModeCard = {
 
 const modes: ModeCard[] = [
   {
-    title: "Realtime Duel",
+    title: "Typing_Wars",
     description: "Race a friend in real time. Share a room ID and type the same passage. Win through grit.",
     route: "/duel",
     badge: "ONLINE_982",
-    meta: "PVP // COMPETITIVE",
+    meta: "COMPETITIVE",
     action: "JOIN_ROOM",
-    icon: "PVP",
+    icon: "WAR",
     tone: "online",
   },
   {
@@ -81,37 +81,31 @@ export const HomePage: React.FC<HomePageProps> = ({ onLogout }) => {
     <div className="neon-shell">
       <aside className="neon-sidebar">
         <div className="neon-sidebar-head">
-          <span className="neon-sidebar-title">LAB_MODULES</span>
-          <span className="neon-sidebar-version">V2.0.4-BETA</span>
+          <span className="neon-sidebar-title">Practice Hub</span>
+          <span className="neon-sidebar-version">Typing Suite v2.0</span>
         </div>
 
         <nav className="neon-sidebar-nav">
-          <Link to="/modes" className="neon-sidebar-link is-active">
-            <span className="neon-sidebar-icon">ARE</span>
-            <span>Arena</span>
-          </Link>
-          <Link to="/dashboard" className="neon-sidebar-link">
-            <span className="neon-sidebar-icon">DAT</span>
-            <span>Data Stream</span>
-          </Link>
-          <Link to="/dashboard" className="neon-sidebar-link">
-            <span className="neon-sidebar-icon">SYS</span>
-            <span>System Log</span>
-          </Link>
+          <NavLink to="/modes" className={({ isActive }) => `neon-sidebar-link${isActive ? " is-active" : ""}`}>
+            <span>Game Modes</span>
+          </NavLink>
+          <NavLink to="/dashboard" className={({ isActive }) => `neon-sidebar-link${isActive ? " is-active" : ""}`}>
+            <span>Progress</span>
+          </NavLink>
         </nav>
 
         <Link to="/practice" className="neon-init-button">
-          INITIATE_TEST
+          Start Practice
         </Link>
 
         <div className="neon-sidebar-foot">
           <Link to="/dashboard" className="neon-sidebar-mini-link">
             <span className="neon-sidebar-icon">SUP</span>
-            <span>Support</span>
+            <span>Help Center</span>
           </Link>
           <Link to="/dashboard" className="neon-sidebar-mini-link">
             <span className="neon-sidebar-icon">DIA</span>
-            <span>Diagnostics</span>
+            <span>Settings</span>
           </Link>
         </div>
       </aside>
@@ -119,7 +113,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onLogout }) => {
       <main className="neon-main">
         <header className="neon-topbar">
           <div className="neon-topbar-left">
-            <div className="neon-brand">NEON_PRECISION</div>
             <label className="neon-search">
               <span>QRY</span>
               <input type="text" placeholder="SEARCH_MODULES..." aria-label="Search modules" />
@@ -144,9 +137,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLogout }) => {
         <section className="neon-canvas">
           <div className="neon-header-row">
             <div>
-              <h1>
-                MODULE_SELECT <span>//</span> <em>ALL_MODES</em>
-              </h1>
+              <h1>Typing Modes</h1>
               <div className="neon-header-underline" />
             </div>
             <div className="neon-system-status">
@@ -160,7 +151,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onLogout }) => {
 
           <div className="neon-module-grid">
             {modes.map((mode) => (
-              <article key={mode.title} className="neon-module-card">
+              <Link key={mode.title} to={mode.route} className="neon-module-card">
                 <div className="neon-card-status">
                   <span className={`neon-pill neon-pill-${mode.tone}`}>
                     <i />
@@ -177,12 +168,12 @@ export const HomePage: React.FC<HomePageProps> = ({ onLogout }) => {
 
                 <div className="neon-card-foot">
                   <span>{mode.meta}</span>
-                  <Link to={mode.route} className="neon-card-action">
+                  <span className="neon-card-action">
                     {mode.action}
                     <b>&gt;</b>
-                  </Link>
+                  </span>
                 </div>
-              </article>
+              </Link>
             ))}
           </div>
 
